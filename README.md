@@ -1,35 +1,28 @@
-# Physics-Informed Latent PDE World Model
+# Physics-Informed Latent World Model (`pde_world_model`)
 
-A modular PyTorch prototype exploring Physics-Informed Latent World Models, replacing unconstrained recurrent or Transformer latent transitions with a structured spatial latent state governed by a discrete PDE residual operator and a residual neural correction, paired with latent Model Predictive Control (Cross-Entropy Method) for planning.
+A prototype combining spatial latent state representations with explicit 2D differential operators (PDE residuals) and a residual neural transition block for short-horizon rollouts and Cross-Entropy Method (CEM) planning.
 
----
+## Overview
 
-## 1. Motivation & Theoretical Overview
+Standard latent world models (such as RSSM / Dreamer-style architectures) typically model latent dynamics with generic recurrent or attention blocks (`GRU`, `Transformer`, or MLPs). While expressive, unconstrained latent transitions can drift out-of-distribution on long horizons or learn arbitrary gauge symmetries with no physical meaning.
 
-Standard world models (such as RSSM / Dreamer-style architectures) typically compress high-dimensional observations into flat or token-based latent vectors and evolve them using black-box sequence models (GRUs, MLPs, or Transformers). While expressive, unconstrained latent transitions can drift over long imagination horizons and lack physical interpretability.
+This repository explores a structured alternative:
+1. **Spatially Typed Latent Grid:** Observations $x_t \in \mathbb{R}^{C \times H \times W}$ are encoded onto a coarser 2D latent grid $z_t \in \mathbb{R}^{4 \times H_z \times W_z}$ with channels assigned to `u`, `v` (2D velocity-like components), `p` (scalar/pressure-like field), and `r` (latent forcing/residual modulation).
+2. **Hybrid Latent Transition:** Each step advances via an explicit finite-difference PDE right-hand side (`LatentPDEResidual`) plus a residual convolutional transition block (`NeuralTransitionOperator`) conditioned on the action $a_t$.
+3. **PDE Residual Loss:** Penalizes discrepancies between discrete time derivatives and the explicit PDE tendencies, with learnable diffusion ($\nu, \kappa$) and damping ($\gamma$) parameters.
+4. **Latent CEM Planning:** Rolls out candidate action sequences in latent space and optimizes an energy/scalar-weighted target objective via Cross-Entropy Method.
 
-In **Physics-Informed Latent World Models**, we address this by:
-1. **Structuring the latent space spatially** on a coarse 2D grid $(H_z, W_z)$ with physically typed channels:
-   $$z_t = \big(u_t,\; v_t,\; p_t,\; r_t\big) \in \mathbb{R}^{4 \times H_z \times W_z}$$
-   - $(u_t, v_t)$: latent 2D velocity components.
-   - $p_t$: latent scalar / pressure-like field.
-   - $r_t$: latent residual / action-modulated forcing channel.
-2. **Coupling explicit PDE tendencies with a neural corrector**:
-   $$z_{t+1} = \operatorname{clip}\Big(z_t + \Delta t \big(\mathcal{F}_{\text{PDE}}(z_t, a_t) + f_{\theta}(z_t, a_t)\big),\; -5,\; 5\Big)$$
-   where $\mathcal{F}_{\text{PDE}}$ computes coupled 2D advection-diffusion and forcing tendencies using differentiable finite-difference operators (`SpatialDifferentialOperators`), with learnable diffusion coefficients ($\nu, \kappa > 0$ via `softplus`) and damping ($\gamma$).
-3. **Training with a multi-term physics-aware objective**:
-   $$\mathcal{L} = \lambda_{\text{rec}} \mathcal{L}_{\text{rec}} + \lambda_{\text{dyn}} \mathcal{L}_{\text{dyn}} + \lambda_{\text{pde}} \mathcal{L}_{\text{pde}} + \lambda_{\text{rollout}} \mathcal{L}_{\text{rollout}} + \mathcal{L}_{\text{reg}}$$
-   - $\mathcal{L}_{\text{rec}}$: observation reconstruction MSE across sequence steps.
-   - $\mathcal{L}_{\text{dyn}}$: one-step latent transition alignment against posterior latents $z_{t+1}^{\text{post}}$.
-   - $\mathcal{L}_{\text{pde}}$: Smooth $L_1$ penalty on the discrete PDE residual $(\hat{z}_{t+1} - \hat{z}_t)/\Delta t - \mathcal{F}_{\text{PDE}}(\hat{z}_{t+1}, a_t)$.
-   - $\mathcal{L}_{\text{rollout}}$: multi-step open-loop imagination loss (`imagine_rollout`) without future observations.
-   - $\mathcal{L}_{\text{reg}}$: mild Gaussian prior regularization on latent mean and log-variance.
+## Honest Scope & Limitations
 
-> **Research Caveat (Identifiability & Gauge Freedom):** Without strong inductive bias or physical supervision, latent fields do not automatically carry metric units and may exhibit coordinate/scaling symmetries. Channel typing, spatial grid structure, and PDE residual penalties help anchor the dynamics, though careful ablation is recommended when transferring to real-world visual or sensor streams.
+This codebase is a **minimal research prototype**, not a full DreamerV3 reproduction or a high-accuracy CFD solver:
 
----
+- **No Guaranteed Physical Identifiability:** A latent space trained with pixel/observation reconstruction and PDE residuals can still exhibit latent gauge symmetries (scaling, shifting, or mixing channels). Learned $\nu$, $\kappa$, and $\gamma$ reflect the *latent* dynamics rather than guaranteed ground-truth physical constants unless anchored by direct state supervision or stronger structural constraints.
+- **Explicit Euler Discretization:** Both the synthetic test environment (`SyntheticFluidEnv`) and the latent transition use explicit Euler steps (`dt`), which require small time steps for numerical stability and can become stiff under high diffusivity or strong advection.
+- **No Incompressibility Projection Yet:** Despite fluid-inspired notation (`u`, `v`, `p`), there is currently no Helmholtz–Hodge projection or divergence-free constraint enforced on `(u, v)`.
+- **Synthetic Benchmark Only:** Included data comes from a fast 2D synthetic advection-diffusion environment designed for end-to-end debugging and rapid iteration, not real-world video or external physics benchmarks.
+- **Planning Objective:** `LatentPDEPlannerCEM` illustrates trajectory optimization over imagined latent rollouts using a heuristic spatial moment cost; it does not yet include an actor-critic policy or learned reward/value head.
 
-## 2. Repository Structure
+## Repository Structure
 
 ```text
 physics_dreamer/
@@ -40,13 +33,30 @@ physics_dreamer/
 ├── src/
 │   └── pde_world_model/
 │       ├── __init__.py
-│       ├── config.py # Typed dataclasses: WorldModelConfig, PlannerConfig
-│       ├── synthetic_env.py # SyntheticFluidEnv: 2D nonlinear advection-diffusion simulator
-│       ├── pde_operators.py # SpatialDifferentialOperators & LatentPDEResidual
-│       ├── networks.py # SpatialEncoder, SpatialDecoder, ResidualPDEBlock, NeuralTransitionOperator
-│       ├── world_model.py # PhysicsInformedLatentWorldModel (transition, rollout, loss)
-│       ├── planner.py # LatentPDEPlannerCEM (latent Cross-Entropy Method planner)
-│       └── trainer.py # Training loop & metric logging
+│       ├── config.py
+│       ├── synthetic_env.py
+│       ├── pde_operators.py
+│       ├── networks.py
+│       ├── world_model.py
+│       ├── planner.py
+│       └── trainer.py
 └── scripts/
-    └── train_and_eval.py 
+    └── train_and_eval.py
 ```
+## Quickstart
+Requirements : 
+- Python 3.10+
+- PyTorch
+### Run End-to-End Training & CEM Evaluation
+From the repository root:
+```python
+python scripts/train_and_eval.py
+````
+The script generates synthetic 2D fluid-like trajectories, trains PhysicsInformedLatentWorldModel, logs loss components (rec, dyn, pde, roll) and learned parameters (nu, kappa), and runs a single CEM planning step on a sample observation.
+
+### Key Configuration Knobs (src/pde_world_model/config.py)
+- latent_grid: Spatial resolution (H_z, W_z) of the structured latent state.
+- Bullet dt, dx, dy: Temporal and spatial grid spacing used in discrete differential operators.
+- Bullet init_nu, init_kappa, init_damping: Initial values for learnable PDE coefficients.
+- Bullet w_rec, w_dyn, w_pde, w_rollout: Loss weights balancing observation reconstruction, one-step latent dynamics, PDE residual minimization, and multi-step imagined rollouts.
+- Bullet rollout_horizon: Number of open-loop latent steps rolled out during training.
