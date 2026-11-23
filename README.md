@@ -1,4 +1,4 @@
-# Physics-Informed Latent World Model (`pde_world_model`)
+# Physics-Informed Latent World Model 
 
 A prototype combining spatial latent state representations with explicit 2D differential operators (PDE residuals) and a residual neural transition block for short-horizon rollouts and Cross-Entropy Method (CEM) planning.
 
