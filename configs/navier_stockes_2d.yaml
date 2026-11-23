@@ -1,0 +1,40 @@
+model:
+  in_channels: 3
+  img_size: [64, 64]
+  latent_grid: [16, 16]
+  action_dim: 2
+  hidden_dim: 64
+
+physics:
+  dt: 0.05
+  dx: 0.0625 # 1.0 / 16.0
+  dy: 0.0625 # 1.0 / 16.0
+  init_nu: 0.02
+  init_kappa: 0.02
+  init_damping: -0.05
+
+loss_weights:
+  w_rec: 1.0
+  w_dyn: 1.0
+  w_pde: 0.5
+  w_rollout: 0.5
+  rollout_horizon: 6
+
+training:
+  batch_size: 32
+  seq_len: 16
+  lr: 3.0e-4
+  weight_decay: 1.0e-4
+  grad_clip: 10.0
+  epochs: 25
+  device: "auto"
+  seed: 42
+
+planner:
+  horizon: 8
+  num_samples: 128
+  num_elites: 16
+  cem_iters: 4
+  action_min: -1.0
+  action_max: 1.0
+  target_pos: [0.25, 0.25]
