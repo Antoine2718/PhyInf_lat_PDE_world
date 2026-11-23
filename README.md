@@ -49,7 +49,7 @@ Requirements :
 - PyTorch
 ### Run End-to-End Training & CEM Evaluation
 From the repository root:
-```python
+```bash 
 python scripts/train_and_eval.py
 ````
 The script generates synthetic 2D fluid-like trajectories, trains PhysicsInformedLatentWorldModel, logs loss components (rec, dyn, pde, roll) and learned parameters (nu, kappa), and runs a single CEM planning step on a sample observation.
